@@ -1,0 +1,87 @@
+#include <LPC17xx.h>
+#include <stdio.h>
+#define RS 8 //P0.8
+#define EN 9//P0.9
+#define DT 4//P0.4 to P0.7 data lines
+unsigned long int temp1=0, temp2=0,i,j,x;
+unsigned char flag1 =0, flag2 =0;
+char lcd[20];
+void lcd_write(void);
+void port_write(void);
+void delay_lcd(unsigned int);
+unsigned long int lcd_commands[] = {0x30,0x30,0x30,0x20,0x28,0xc0,0x0c,0x06,0x01,0x80};
+unsigned int digital = 0;
+float temperature = 0;
+void ADC_IRQHandler()
+{
+	digital = (LPC_ADC->ADGDR>>4) & 0xFFF;
+	digital = (LPC_ADC->ADDR0) & 0XFFF;
+	temperature = (float)(digital*3.3)/4096;
+	temperature *=100;
+	sprintf(lcd,sizeof(lcd),"%3.1fDEGC",temperature);
+	for(x=0;x<1000000;x++);
+
+	flag1 =1;
+	i =0;
+	while (lcd[i] != '\0')
+	{
+		temp1 = lcd[i]; // char by char
+		lcd_write();
+		i+= 1;if(i==16) //check for 1 charactres in first line
+			{	
+				flag1=0; //if yes
+				temp1=0xc0; //configure second line in command register
+				lcd_write();	
+				flag1=1;
+			}
+		} 
+	}
+
+	int main(void)
+	{
+		SystemInit();
+		SystemCoreClockUpdate(); 
+		LPC_SC->PCONP |= 1<<12;
+		LPC_PINCON->PINSEL1 |= (1<<14); //select AD0.0 for P0.23
+		LPC_ADC->ADCR = 1<<0|1<<16|1<<21; //Burst Mode and Operational
+		LPC_ADC->ADINTEN = 1<<0;
+ 		NVIC_EnableIRQn(ADC_IRQn);
+		LPC_GPIO0->FIODIR = 0X3F<<4; //P0.4-P0.9 as output
+		flag1 =0; // flag1 = 0 all are command and flag1 = 1 all are data
+		for (i=0; i<9;i++)
+		{
+			temp1 = lcd_commands[i];
+			lcd_write();}while(1);
+		}
+ 
+	void lcd_write(void)
+	{
+		flag2 = (flag1 == 1) ? 0 :((temp1 == 0x30) || (temp1 == 0x20)) ? 1 : 0;
+		temp2 = temp1 & 0xf0;//move data (26-8+1) times : 26 -HN place, 4 -Bits to extract MSB and then LSB as nedd to send 4 bit at a time
+		temp2=temp2>>4;temp2 = temp2 << DT;//data lines from 4 to 7
+		port_write();
+		if (!flag2)
+		{
+			temp2 = temp1 & 0x0f; //26-4+1temp2 = temp2 << 4;
+			port_write();
+		}
+	}
+	void port_write(void)
+	{
+		LPC_GPIO0->FIOPIN = 0;
+		LPC_GPIO0->FIOPIN = temp2;
+		if (flag1 == 0)
+			LPC_GPIO0->FIOCLR = 1<<RS;
+		else
+			LPC_GPIO0->FIOSET = 1<<RS;
+		LPC_GPIO0->FIOSET = 1<<EN; //this and below 3 lines are used give pulse for enableand wait for some time interval
+		delay_lcd(25);
+		LPC_GPIO0->FIOCLR = 1<<EN;
+		delay_lcd(30000); // 3 ms highest delay 
+	}
+	void delay_lcd(unsigned int r1)
+	{
+		unsigned int r;
+		for(r=0;r<r1;r++);
+		return;
+	}
